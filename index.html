@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CraftHost — Free Minecraft Hosting</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+
+<!-- Firebase -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, updateDoc, deleteDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// =============================================
+// 🔥 PASTE YOUR FIREBASE CONFIG HERE
+// Go to: console.firebase.google.com
+// Create project → Add web app → Copy config
+// =============================================
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ── Expose to window so inline handlers can reach them ──
+window._auth = auth;
+window._db = db;
+window._fns = {
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, updateProfile,
+  doc, setDoc, getDoc, collection, addDoc, getDocs,
+  updateDoc, deleteDoc, query, where, serverTimestamp
+};
+
+// ── Auth state listener ──
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    window._currentUser = user;
+    showPage('dashboard');
+    await loadDashboard();
+  } else {
+    window._currentUser = null;
+    showPage('landing');
+  }
+});
+</script>
+
+<style>
+:root {
+  --green:#00ff88; --green2:#00cc6a; --red:#ff4466; --yellow:#ffcc00;
+  --blue:#00aaff;
+  --dark:#07090d; --dark2:#0d1117; --card:#111820; --card2:#161e28;
+  --border:#1e2d3d; --text:#c9d8e8; --muted:#4a6a85;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--dark);color:var(--text);font-family:'Outfit',sans-serif;min-height:100vh;overflow-x:hidden;}
+
+/* ── PAGES ── */
+.page{display:none;min-height:100vh;}
+.page.active{display:block;}
+
+/* ── CANVAS ── */
+#bg{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;opacity:.15;pointer-events:none;}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;width:100%;z-index:100;height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 5%;background:rgba(7,9,13,.9);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);}
+.logo{font-family:'Press Start 2P',monospace;font-size:12px;color:var(--green);text-decoration:none;cursor:pointer;}
+.logo span{color:#fff;}
+.nav-links{display:flex;gap:28px;list-style:none;}
+.nav-links a{color:var(--muted);font-size:13px;font-weight:500;text-decoration:none;transition:color .2s;cursor:pointer;}
+.nav-links a:hover{color:var(--green);}
+.nav-actions{display:flex;gap:10px;}
+.btn{padding:9px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all .2s;font-family:'Outfit',sans-serif;}
+.btn-outline{background:transparent;color:var(--green);border:1px solid var(--green);}
+.btn-outline:hover{background:rgba(0,255,136,.08);}
+.btn-solid{background:var(--green);color:#000;}
+.btn-solid:hover{background:#fff;transform:translateY(-1px);}
+.btn-red{background:var(--red);color:#fff;}
+.btn-red:hover{opacity:.85;}
+.btn-sm{padding:6px 14px;font-size:12px;}
+.btn-block{width:100%;padding:13px;font-size:14px;}
+
+/* ── HERO ── */
+.hero{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:90px 20px 60px;}
+.badge{display:inline-flex;align-items:center;gap:8px;background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.2);border-radius:99px;padding:6px 16px;font-size:11px;color:var(--green);margin-bottom:28px;font-weight:600;}
+.badge::before{content:'';width:7px;height:7px;background:var(--green);border-radius:50%;animation:blink 1.5s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.hero h1{font-family:'Press Start 2P',monospace;font-size:clamp(18px,3.5vw,38px);line-height:1.6;color:#fff;margin-bottom:18px;max-width:780px;}
+.hero h1 .hl{color:var(--green);}
+.hero p{font-size:clamp(14px,1.8vw,17px);color:var(--muted);max-width:500px;line-height:1.75;margin-bottom:36px;}
+.hero-btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;}
+.hero-stats{display:flex;gap:36px;margin-top:56px;flex-wrap:wrap;justify-content:center;}
+.stat .n{font-family:'Press Start 2P',monospace;font-size:16px;color:var(--green);}
+.stat .l{font-size:11px;color:var(--muted);margin-top:5px;}
+
+/* ── SECTION ── */
+section.s{position:relative;z-index:1;padding:72px 5%;}
+.slabel{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--green);letter-spacing:2px;margin-bottom:10px;}
+.stitle{font-size:clamp(20px,2.8vw,32px);font-weight:800;color:#fff;margin-bottom:10px;}
+.ssub{color:var(--muted);font-size:14px;max-width:480px;line-height:1.7;}
+.shead{margin-bottom:48px;}
+hr.div{border:none;border-top:1px solid var(--border);}
+
+/* ── FEATURES ── */
+.feat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;}
+.feat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:26px;transition:all .3s;position:relative;overflow:hidden;}
+.feat::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);opacity:0;transition:.3s;}
+.feat:hover{transform:translateY(-4px);border-color:rgba(0,255,136,.25);}
+.feat:hover::after{opacity:1;}
+.feat-ico{font-size:24px;margin-bottom:14px;}
+.feat h3{font-size:14px;font-weight:700;color:#fff;margin-bottom:6px;}
+.feat p{font-size:12px;color:var(--muted);line-height:1.6;}
+
+/* ── PRICING ── */
+.price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;max-width:860px;margin:0 auto;}
+.pcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;position:relative;transition:all .3s;}
+.pcard.pop{border-color:var(--green);background:linear-gradient(145deg,#0d1f16,var(--card));}
+.pop-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;font-size:9px;font-weight:800;padding:4px 14px;border-radius:99px;white-space:nowrap;font-family:'Press Start 2P',monospace;}
+.plan-name{font-family:'Press Start 2P',monospace;font-size:10px;color:var(--green);margin-bottom:14px;}
+.price{font-size:38px;font-weight:800;color:#fff;}
+.price sup{font-size:16px;vertical-align:top;margin-top:6px;color:var(--muted);}
+.price span{font-size:13px;color:var(--muted);font-weight:400;}
+.pdesc{font-size:12px;color:var(--muted);margin:10px 0 20px;}
+.pfeats{list-style:none;display:flex;flex-direction:column;gap:9px;margin-bottom:24px;}
+.pfeats li{font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px;}
+.pfeats li::before{content:'✓';color:var(--green);font-weight:800;}
+.pfeats li.no{color:var(--muted);}
+.pfeats li.no::before{content:'✕';color:var(--muted);}
+
+/* ── AUTH MODAL ── */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
+.overlay.open{display:flex;}
+.modal{background:var(--dark2);border:1px solid var(--border);border-radius:16px;padding:36px;width:100%;max-width:420px;position:relative;animation:slideUp .25s ease;}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-title{font-family:'Press Start 2P',monospace;font-size:13px;color:var(--green);margin-bottom:6px;}
+.modal-sub{font-size:13px;color:var(--muted);margin-bottom:24px;}
+.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;}
+.modal-close:hover{color:#fff;}
+.form-group{margin-bottom:16px;}
+.form-group label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+.form-group input{width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:#fff;font-size:14px;font-family:'Outfit',sans-serif;transition:border .2s;outline:none;}
+.form-group input:focus{border-color:var(--green);}
+.form-err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px;}
+.form-switch{font-size:13px;color:var(--muted);margin-top:16px;text-align:center;}
+.form-switch a{color:var(--green);cursor:pointer;text-decoration:none;font-weight:600;}
+.form-switch a:hover{text-decoration:underline;}
+
+/* ── DASHBOARD LAYOUT ── */
+.dash-wrap{display:flex;min-height:100vh;padding-top:62px;}
+.sidebar{width:220px;background:var(--dark2);border-right:1px solid var(--border);padding:24px 0;flex-shrink:0;position:fixed;top:62px;bottom:0;overflow-y:auto;}
+.sidebar-user{padding:16px 20px 20px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+.sidebar-avatar{width:42px;height:42px;background:linear-gradient(135deg,var(--green),#0088ff);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:10px;}
+.sidebar-name{font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sidebar-email{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.nav-item{display:flex;align-items:center;gap:12px;padding:11px 20px;color:var(--muted);font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;border-left:3px solid transparent;}
+.nav-item:hover{color:#fff;background:rgba(255,255,255,.04);}
+.nav-item.active{color:var(--green);background:rgba(0,255,136,.06);border-left-color:var(--green);}
+.nav-item .ico{font-size:16px;width:20px;text-align:center;}
+.dash-main{margin-left:220px;flex:1;padding:32px 36px;min-height:calc(100vh - 62px);}
+.dash-section{display:none;}
+.dash-section.active{display:block;}
+
+/* ── DASH HEADER ── */
+.dash-header{margin-bottom:28px;}
+.dash-header h2{font-family:'Press Start 2P',monospace;font-size:14px;color:#fff;margin-bottom:6px;}
+.dash-header p{font-size:13px;color:var(--muted);}
+
+/* ── STATS CARDS ── */
+.stat-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:28px;}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.stat-card .sc-label{font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;}
+.stat-card .sc-val{font-family:'Press Start 2P',monospace;font-size:18px;color:var(--green);}
+.stat-card .sc-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+
+/* ── SERVER CARDS ── */
+.server-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px;}
+.srv-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border .2s;}
+.srv-card:hover{border-color:rgba(0,255,136,.2);}
+.srv-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.srv-name{font-size:15px;font-weight:700;color:#fff;}
+.srv-status{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;}
+.srv-status .dot{width:7px;height:7px;border-radius:50%;}
+.status-online .dot{background:var(--green);box-shadow:0 0 6px var(--green);}
+.status-online{color:var(--green);}
+.status-offline .dot{background:var(--muted);}
+.status-offline{color:var(--muted);}
+.status-starting .dot{background:var(--yellow);animation:blink 1s infinite;}
+.status-starting{color:var(--yellow);}
+.srv-info{display:flex;flex-direction:column;gap:7px;margin-bottom:18px;}
+.srv-row{display:flex;justify-content:space-between;align-items:center;}
+.srv-row .k{font-size:11px;color:var(--muted);}
+.srv-row .v{font-size:12px;color:var(--text);font-weight:600;font-family:monospace;}
+.ram-bar{background:var(--border);border-radius:99px;height:5px;overflow:hidden;flex:1;margin-left:10px;}
+.ram-fill{height:100%;background:linear-gradient(90deg,var(--green),#00aaff);border-radius:99px;transition:width .5s;}
+.srv-actions{display:flex;gap:8px;}
+.srv-btn{flex:1;padding:8px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;border:none;font-family:'Outfit',sans-serif;transition:all .2s;}
+.srv-btn-start{background:rgba(0,255,136,.1);color:var(--green);border:1px solid rgba(0,255,136,.2);}
+.srv-btn-start:hover{background:rgba(0,255,136,.2);}
+.srv-btn-stop{background:rgba(255,68,102,.1);color:var(--red);border:1px solid rgba(255,68,102,.2);}
+.srv-btn-stop:hover{background:rgba(255,68,102,.2);}
+.srv-btn-restart{background:rgba(255,204,0,.1);color:var(--yellow);border:1px solid rgba(255,204,0,.2);}
+.srv-btn-restart:hover{background:rgba(255,204,0,.2);}
+.srv-btn-delete{background:rgba(255,68,102,.08);color:var(--red);border:1px solid rgba(255,68,102,.15);}
+.srv-btn-delete:hover{background:rgba(255,68,102,.18);}
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted);}
+.empty-state .ei{font-size:48px;margin-bottom:16px;}
+.empty-state h3{font-size:15px;color:#fff;margin-bottom:8px;}
+.empty-state p{font-size:13px;line-height:1.6;}
+
+/* ── CREATE SERVER MODAL ── */
+.form-select{width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:#fff;font-size:14px;font-family:'Outfit',sans-serif;outline:none;cursor:pointer;}
+.form-select:focus{border-color:var(--green);}
+.form-select option{background:var(--card2);}
+
+/* ── CONSOLE ── */
+.console-box{background:#000;border:1px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:12px;height:220px;overflow-y:auto;line-height:1.7;margin-bottom:12px;}
+.console-line{color:#aaa;}
+.console-line.green{color:var(--green);}
+.console-line.yellow{color:var(--yellow);}
+.console-line.red{color:var(--red);}
+.console-line.white{color:#fff;}
+.console-input-wrap{display:flex;gap:8px;}
+.console-input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:10px 14px;color:#fff;font-size:13px;font-family:monospace;outline:none;}
+.console-input:focus{border-color:var(--green);}
+
+/* ── SETTINGS ── */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;}
+.settings-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;}
+.settings-card h3{font-size:14px;font-weight:700;color:#fff;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+@media(max-width:700px){
+  .settings-grid{grid-template-columns:1fr;}
+  .sidebar{display:none;}
+  .dash-main{margin-left:0;padding:20px 16px;}
+}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:14px 20px;font-size:13px;color:#fff;z-index:999;transform:translateY(80px);opacity:0;transition:all .3s;max-width:300px;}
+.toast.show{transform:translateY(0);opacity:1;}
+.toast.success{border-left:3px solid var(--green);}
+.toast.error{border-left:3px solid var(--red);}
+
+/* ── REVEAL ── */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .55s ease,transform .55s ease;}
+.reveal.visible{opacity:1;transform:none;}
+
+/* ── LOADING ── */
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(0,0,0,.3);border-top-color:#000;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div class="toast" id="toast"></div>
+
+<!-- ════════════════════════════════════════
+     LANDING PAGE
+════════════════════════════════════════ -->
+<div class="page active" id="page-landing">
+
+  <nav>
+    <span class="logo" onclick="scrollTo(0,0)">Craft<span>Host</span></span>
+    <ul class="nav-links">
+      <li><a onclick="document.getElementById('feat').scrollIntoView({behavior:'smooth'})">Features</a></li>
+      <li><a onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})">Pricing</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn btn-outline" onclick="openModal('login')">Login</button>
+      <button class="btn btn-solid" onclick="openModal('register')">Sign Up Free</button>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <div class="badge">🟢 Servers Online Now</div>
+    <h1>Your <span class="hl">Minecraft</span><br/>Server, Instantly Free</h1>
+    <p>Create your own Minecraft server in seconds. DDoS protected, mod support, real-time console — 100% free forever.</p>
+    <div class="hero-btns">
+      <button class="btn btn-solid" style="font-size:15px;padding:14px 32px;" onclick="openModal('register')">🎮 Create Free Server</button>
+      <button class="btn btn-outline" style="font-size:15px;padding:14px 32px;" onclick="document.getElementById('feat').scrollIntoView({behavior:'smooth'})">See Features</button>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><div class="n">12K+</div><div class="l">Servers Created</div></div>
+      <div class="stat"><div class="n">99.9%</div><div class="l">Uptime</div></div>
+      <div class="stat"><div class="n">FREE</div><div class="l">Forever Plan</div></div>
+      <div class="stat"><div class="n">&lt;30s</div><div class="l">Setup Time</div></div>
+    </div>
+  </div>
+
+  <hr class="div"/>
+
+  <section class="s" id="feat">
+    <div class="shead reveal">
+      <div class="slabel">Features</div>
+      <div class="stitle">Everything You Need</div>
+      <div class="ssub">Powerful tools built for Minecraft players and communities.</div>
+    </div>
+    <div class="feat-grid">
+      <div class="feat reveal"><div class="feat-ico">🛡️</div><h3>DDoS Protection</h3><p>Enterprise-grade protection on every server. Stay online no matter what.</p></div>
+      <div class="feat reveal"><div class="feat-ico">⚡</div><h3>Instant Setup</h3><p>Your server goes live in under 30 seconds. Zero technical knowledge needed.</p></div>
+      <div class="feat reveal"><div class="feat-ico">🧩</div><h3>Mods & Plugins</h3><p>Full support for Forge, Fabric, Paper, Spigot, and all popular mod loaders.</p></div>
+      <div class="feat reveal"><div class="feat-ico">💾</div><h3>Auto Backups</h3><p>Automatic world backups every 24 hours. Restore anytime with one click.</p></div>
+      <div class="feat reveal"><div class="feat-ico">📊</div><h3>Web Console</h3><p>Real-time server console from any browser. Send commands, see live logs.</p></div>
+      <div class="feat reveal"><div class="feat-ico">🌍</div><h3>Java & Bedrock</h3><p>Host Java or Bedrock edition. Support for all Minecraft versions.</p></div>
+    </div>
+  </section>
+
+  <hr class="div"/>
+
+  <section class="s" id="pricing" style="text-align:center;">
+    <div class="shead reveal" style="text-align:center;">
+      <div class="slabel">Pricing</div>
+      <div class="stitle">Simple Free Hosting</div>
+      <div class="ssub" style="margin:0 auto;">Everything free. Upgrade for more power anytime.</div>
+    </div>
+    <div class="price-grid">
+      <div class="pcard reveal">
+        <div class="plan-name">Starter</div>
+        <div class="price">$0<span>/mo</span></div>
+        <div class="pdesc">Perfect for playing with friends.</div>
+        <ul class="pfeats">
+          <li>1 GB RAM</li><li>10 GB Storage</li><li>10 Player Slots</li>
+          <li>Java & Bedrock</li><li>DDoS Protection</li>
+          <li class="no">Mods/Plugins</li><li class="no">Custom Domain</li>
+        </ul>
+        <button class="btn btn-outline btn-block" onclick="openModal('register')">Get Started Free</button>
+      </div>
+      <div class="pcard pop reveal">
+        <div class="pop-badge">MOST POPULAR</div>
+        <div class="plan-name">Basic</div>
+        <div class="price"><sup>$</sup>2<span>/mo</span></div>
+        <div class="pdesc">Great for small SMP communities.</div>
+        <ul class="pfeats">
+          <li>2 GB RAM</li><li>25 GB Storage</li><li>30 Player Slots</li>
+          <li>Java & Bedrock</li><li>DDoS Protection</li>
+          <li>Plugins & Mods</li><li class="no">Custom Domain</li>
+        </ul>
+        <button class="btn btn-solid btn-block" onclick="openModal('register')">Get Basic</button>
+      </div>
+      <div class="pcard reveal">
+        <div class="plan-name">Pro</div>
+        <div class="price"><sup>$</sup>5<span>/mo</span></div>
+        <div class="pdesc">For serious servers & large communities.</div>
+        <ul class="pfeats">
+          <li>4 GB RAM</li><li>50 GB Storage</li><li>Unlimited Slots</li>
+          <li>Java & Bedrock</li><li>DDoS Protection</li>
+          <li>Plugins & Mods</li><li>Custom Domain</li>
+        </ul>
+        <button class="btn btn-outline btn-block" onclick="openModal('register')">Get Pro</button>
+      </div>
+    </div>
+  </section>
+
+  <footer style="position:relative;z-index:1;border-top:1px solid var(--border);padding:32px 5%;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
+    <span style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--green);">CraftHost</span>
+    <span style="font-size:12px;color:var(--muted);">© 2026 CraftHost. Free Minecraft Hosting.</span>
+    <div style="display:flex;gap:20px;">
+      <a href="#" style="font-size:12px;color:var(--muted);text-decoration:none;">Discord</a>
+      <a href="#" style="font-size:12px;color:var(--muted);text-decoration:none;">Terms</a>
+      <a href="#" style="font-size:12px;color:var(--muted);text-decoration:none;">Privacy</a>
+    </div>
+  </footer>
+</div><!-- end landing -->
+
+<!-- ════════════════════════════════════════
+     DASHBOARD PAGE
+════════════════════════════════════════ -->
+<div class="page" id="page-dashboard">
+
+  <nav>
+    <span class="logo">Craft<span>Host</span></span>
+    <ul class="nav-links">
+      <li><a onclick="switchTab('servers')">My Servers</a></li>
+      <li><a onclick="switchTab('console')">Console</a></li>
+      <li><a onclick="switchTab('settings')">Settings</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn btn-outline btn-sm" onclick="doLogout()">Logout</button>
+    </div>
+  </nav>
+
+  <div class="dash-wrap">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar" id="sb-avatar">⛏</div>
+        <div class="sidebar-name" id="sb-name">Loading...</div>
+        <div class="sidebar-email" id="sb-email">...</div>
+      </div>
+      <div class="nav-item active" onclick="switchTab('servers')"><span class="ico">🖥️</span> My Servers</div>
+      <div class="nav-item" onclick="switchTab('console')"><span class="ico">💻</span> Console</div>
+      <div class="nav-item" onclick="switchTab('settings')"><span class="ico">⚙️</span> Settings</div>
+      <div class="nav-item" onclick="doLogout()" style="margin-top:auto;color:var(--red)"><span class="ico">🚪</span> Logout</div>
+    </aside>
+
+    <main class="dash-main">
+
+      <!-- SERVERS TAB -->
+      <div class="dash-section active" id="tab-servers">
+        <div class="dash-header">
+          <h2>My Servers</h2>
+          <p>Manage and monitor your Minecraft servers.</p>
+        </div>
+        <div class="stat-cards">
+          <div class="stat-card"><div class="sc-label">TOTAL SERVERS</div><div class="sc-val" id="sc-total">0</div><div class="sc-sub">of 3 max (free)</div></div>
+          <div class="stat-card"><div class="sc-label">ONLINE</div><div class="sc-val" id="sc-online" style="color:var(--green)">0</div><div class="sc-sub">servers running</div></div>
+          <div class="stat-card"><div class="sc-label">PLAN</div><div class="sc-val" style="font-size:13px;">FREE</div><div class="sc-sub">Starter tier</div></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <span style="font-size:13px;color:var(--muted)" id="srv-count-label">0 servers</span>
+          <button class="btn btn-solid btn-sm" onclick="openModal('create')">+ Create Server</button>
+        </div>
+        <div class="server-grid" id="server-grid">
+          <div class="empty-state" id="empty-state">
+            <div class="ei">⛏️</div>
+            <h3>No Servers Yet</h3>
+            <p>Click "Create Server" to launch your first free Minecraft server!</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONSOLE TAB -->
+      <div class="dash-section" id="tab-console">
+        <div class="dash-header">
+          <h2>Server Console</h2>
+          <p>View logs and send commands to your server.</p>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="font-size:12px;color:var(--muted);margin-bottom:6px;display:block;font-weight:600;">SELECT SERVER</label>
+          <select class="form-select" id="console-srv-select" style="max-width:300px;" onchange="loadConsole()">
+            <option value="">-- Choose a server --</option>
+          </select>
+        </div>
+        <div class="console-box" id="console-box">
+          <div class="console-line">[CraftHost] Select a server above to view its console.</div>
+        </div>
+        <div class="console-input-wrap">
+          <input class="console-input" id="console-input" placeholder="Type command... (e.g. /say Hello)" onkeydown="if(event.key==='Enter')sendCmd()"/>
+          <button class="btn btn-solid btn-sm" onclick="sendCmd()">Send</button>
+        </div>
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div class="dash-section" id="tab-settings">
+        <div class="dash-header">
+          <h2>Settings</h2>
+          <p>Manage your account and preferences.</p>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-card">
+            <h3>👤 Profile</h3>
+            <div class="form-group">
+              <label>Display Name</label>
+              <input type="text" id="set-name" placeholder="Your name"/>
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" id="set-email" placeholder="Email" disabled style="opacity:.5"/>
+            </div>
+            <button class="btn btn-solid btn-sm" onclick="saveProfile()">Save Changes</button>
+          </div>
+          <div class="settings-card">
+            <h3>🔒 Security</h3>
+            <div class="form-group">
+              <label>Current Password</label>
+              <input type="password" id="set-oldpw" placeholder="Current password"/>
+            </div>
+            <div class="form-group">
+              <label>New Password</label>
+              <input type="password" id="set-newpw" placeholder="New password (min 6 chars)"/>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="toast('Password change coming soon!','error')">Change Password</button>
+          </div>
+          <div class="settings-card">
+            <h3>📦 Plan</h3>
+            <p style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:16px;">You are on the <strong style="color:var(--green)">Free Starter</strong> plan. Up to 3 servers, 1GB RAM each.</p>
+            <button class="btn btn-solid btn-sm" onclick="toast('Upgrade plans coming soon!','success')">Upgrade Plan</button>
+          </div>
+          <div class="settings-card">
+            <h3>🗑️ Danger Zone</h3>
+            <p style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:16px;">Deleting your account is permanent and removes all servers.</p>
+            <button class="btn btn-red btn-sm" onclick="toast('Contact support to delete account.','error')">Delete Account</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div><!-- end dashboard -->
+
+<!-- ════════════════════════════════════════
+     MODALS
+════════════════════════════════════════ -->
+
+<!-- LOGIN -->
+<div class="overlay" id="modal-login">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('login')">✕</button>
+    <div class="modal-title">Welcome Back</div>
+    <div class="modal-sub">Login to your CraftHost account</div>
+    <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="you@email.com"/></div>
+    <div class="form-group"><label>Password</label><input type="password" id="login-pw" placeholder="Your password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div class="form-err" id="login-err"></div>
+    <button class="btn btn-solid btn-block" id="login-btn" onclick="doLogin()">Login</button>
+    <div class="form-switch">Don't have an account? <a onclick="closeModal('login');openModal('register')">Sign up free</a></div>
+  </div>
+</div>
+
+<!-- REGISTER -->
+<div class="overlay" id="modal-register">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('register')">✕</button>
+    <div class="modal-title">Create Account</div>
+    <div class="modal-sub">Join CraftHost — it's completely free</div>
+    <div class="form-group"><label>Display Name</label><input type="text" id="reg-name" placeholder="Steve"/></div>
+    <div class="form-group"><label>Email</label><input type="email" id="reg-email" placeholder="you@email.com"/></div>
+    <div class="form-group"><label>Password</label><input type="password" id="reg-pw" placeholder="Min 6 characters" onkeydown="if(event.key==='Enter')doRegister()"/></div>
+    <div class="form-err" id="reg-err"></div>
+    <button class="btn btn-solid btn-block" id="reg-btn" onclick="doRegister()">Create Free Account</button>
+    <div class="form-switch">Already have an account? <a onclick="closeModal('register');openModal('login')">Login</a></div>
+  </div>
+</div>
+
+<!-- CREATE SERVER -->
+<div class="overlay" id="modal-create">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('create')">✕</button>
+    <div class="modal-title">New Server</div>
+    <div class="modal-sub">Configure your Minecraft server</div>
+    <div class="form-group"><label>Server Name</label><input type="text" id="srv-name" placeholder="My Survival World"/></div>
+    <div class="form-group">
+      <label>Version</label>
+      <select class="form-select" id="srv-version">
+        <option>1.21.4 (Latest)</option>
+        <option>1.20.4</option>
+        <option>1.19.4</option>
+        <option>1.18.2</option>
+        <option>1.16.5</option>
+        <option>1.12.2</option>
+        <option>1.8.9</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Server Type</label>
+      <select class="form-select" id="srv-type">
+        <option>Vanilla</option>
+        <option>Paper (Plugins)</option>
+        <option>Spigot</option>
+        <option>Forge (Mods)</option>
+        <option>Fabric</option>
+        <option>Bedrock</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>RAM</label>
+      <select class="form-select" id="srv-ram">
+        <option value="1">1 GB (Free)</option>
+        <option value="2">2 GB (Basic)</option>
+        <option value="4">4 GB (Pro)</option>
+      </select>
+    </div>
+    <div class="form-err" id="create-err"></div>
+    <button class="btn btn-solid btn-block" id="create-btn" onclick="doCreateServer()">🚀 Create Server</button>
+  </div>
+</div>
+
+<!-- SERVER DETAIL -->
+<div class="overlay" id="modal-detail">
+  <div class="modal" style="max-width:500px;">
+    <button class="modal-close" onclick="closeModal('detail')">✕</button>
+    <div class="modal-title" id="detail-name">Server Name</div>
+    <div class="modal-sub" id="detail-ip" style="font-family:monospace;color:var(--green);">play.crafthost.net:25565</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0;">
+      <div style="background:var(--card);border-radius:8px;padding:14px;"><div style="font-size:10px;color:var(--muted);margin-bottom:4px;">VERSION</div><div style="font-size:13px;color:#fff;font-weight:700;" id="detail-version">—</div></div>
+      <div style="background:var(--card);border-radius:8px;padding:14px;"><div style="font-size:10px;color:var(--muted);margin-bottom:4px;">TYPE</div><div style="font-size:13px;color:#fff;font-weight:700;" id="detail-type">—</div></div>
+      <div style="background:var(--card);border-radius:8px;padding:14px;"><div style="font-size:10px;color:var(--muted);margin-bottom:4px;">RAM</div><div style="font-size:13px;color:#fff;font-weight:700;" id="detail-ram">—</div></div>
+      <div style="background:var(--card);border-radius:8px;padding:14px;"><div style="font-size:10px;color:var(--muted);margin-bottom:4px;">STATUS</div><div style="font-size:13px;font-weight:700;" id="detail-status">—</div></div>
+    </div>
+    <div style="background:var(--card);border-radius:8px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">SERVER IP (share with friends)</div>
+      <div style="font-family:monospace;font-size:14px;color:var(--green);display:flex;align-items:center;justify-content:space-between;" id="detail-ip2">
+        <span id="detail-ip-text">—</span>
+        <button class="btn btn-outline btn-sm" onclick="copyIP()">Copy</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="srv-btn srv-btn-start" style="flex:1;padding:10px;" onclick="detailAction('start')">▶ Start</button>
+      <button class="srv-btn srv-btn-stop" style="flex:1;padding:10px;" onclick="detailAction('stop')">⏹ Stop</button>
+      <button class="srv-btn srv-btn-restart" style="flex:1;padding:10px;" onclick="detailAction('restart')">🔄 Restart</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════
+// CANVAS PARTICLES
+// ════════════════════════════════════════
+const canvas = document.getElementById('bg');
+const ctx = canvas.getContext('2d');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize(); window.addEventListener('resize',resize);
+class Cube{
+  constructor(){this.reset();}
+  reset(){this.x=Math.random()*W;this.y=Math.random()*H;this.s=4+Math.random()*10;this.vx=(Math.random()-.5)*.2;this.vy=-(0.1+Math.random()*.35);this.op=0.3+Math.random()*.7;this.col=Math.random()>.5?'#00ff88':'#ffffff';}
+  tick(){this.x+=this.vx;this.y+=this.vy;if(this.y<-20)this.reset(),this.y=H+10;}
+  draw(){ctx.save();ctx.globalAlpha=this.op;ctx.fillStyle=this.col;ctx.fillRect(this.x,this.y,this.s,this.s);ctx.fillStyle='rgba(255,255,255,0.15)';ctx.fillRect(this.x,this.y,this.s,this.s*.35);ctx.restore();}
+}
+const cubes=Array.from({length:55},()=>new Cube());
+(function loop(){ctx.clearRect(0,0,W,H);cubes.forEach(c=>{c.tick();c.draw();});requestAnimationFrame(loop);})();
+
+// ════════════════════════════════════════
+// PAGE ROUTING
+// ════════════════════════════════════════
+function showPage(p){
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  document.getElementById('page-'+p).classList.add('active');
+}
+
+// ════════════════════════════════════════
+// MODAL HELPERS
+// ════════════════════════════════════════
+function openModal(id){document.getElementById('modal-'+id).classList.add('open');}
+function closeModal(id){document.getElementById('modal-'+id).classList.remove('open');}
+document.querySelectorAll('.overlay').forEach(o=>{
+  o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');});
+});
+
+// ════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════
+function toast(msg,type='success'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className='toast '+type+' show';
+  setTimeout(()=>t.classList.remove('show'),3200);
+}
+
+// ════════════════════════════════════════
+// AUTH
+// ════════════════════════════════════════
+async function doLogin(){
+  const email=document.getElementById('login-email').value.trim();
+  const pw=document.getElementById('login-pw').value;
+  const err=document.getElementById('login-err');
+  const btn=document.getElementById('login-btn');
+  if(!email||!pw){err.textContent='Please fill all fields.';return;}
+  btn.innerHTML='<span class="spinner"></span>Logging in...';btn.disabled=true;
+  try{
+    await window._fns.signInWithEmailAndPassword(window._auth,email,pw);
+    closeModal('login');toast('Welcome back! 🎮');
+  }catch(e){
+    err.textContent=friendlyError(e.code);
+  }
+  btn.innerHTML='Login';btn.disabled=false;
+}
+
+async function doRegister(){
+  const name=document.getElementById('reg-name').value.trim();
+  const email=document.getElementById('reg-email').value.trim();
+  const pw=document.getElementById('reg-pw').value;
+  const err=document.getElementById('reg-err');
+  const btn=document.getElementById('reg-btn');
+  if(!name||!email||!pw){err.textContent='Please fill all fields.';return;}
+  if(pw.length<6){err.textContent='Password must be at least 6 characters.';return;}
+  btn.innerHTML='<span class="spinner"></span>Creating account...';btn.disabled=true;
+  try{
+    const cred=await window._fns.createUserWithEmailAndPassword(window._auth,email,pw);
+    await window._fns.updateProfile(cred.user,{displayName:name});
+    const db=window._db; const fns=window._fns;
+    await fns.setDoc(fns.doc(db,'users',cred.user.uid),{
+      name,email,plan:'free',createdAt:fns.serverTimestamp()
+    });
+    closeModal('register');toast('Account created! Welcome to CraftHost 🎉');
+  }catch(e){
+    err.textContent=friendlyError(e.code);
+  }
+  btn.innerHTML='Create Free Account';btn.disabled=false;
+}
+
+async function doLogout(){
+  await window._fns.signOut(window._auth);
+  toast('Logged out. See you soon!');
+}
+
+function friendlyError(code){
+  const map={
+    'auth/user-not-found':'No account with that email.',
+    'auth/wrong-password':'Incorrect password.',
+    'auth/email-already-in-use':'Email already registered. Try logging in.',
+    'auth/invalid-email':'Invalid email address.',
+    'auth/weak-password':'Password too weak (min 6 chars).',
+    'auth/invalid-credential':'Wrong email or password.',
+  };
+  return map[code]||'Something went wrong. Try again.';
+}
+
+// ════════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════════
+async function loadDashboard(){
+  const user=window._currentUser;
+  if(!user)return;
+  // Sidebar
+  document.getElementById('sb-name').textContent=user.displayName||'Player';
+  document.getElementById('sb-email').textContent=user.email;
+  document.getElementById('sb-avatar').textContent=(user.displayName||'?')[0].toUpperCase();
+  // Settings pre-fill
+  document.getElementById('set-name').value=user.displayName||'';
+  document.getElementById('set-email').value=user.email||'';
+  await loadServers();
+}
+
+// ════════════════════════════════════════
+// SERVERS
+// ════════════════════════════════════════
+let _servers=[];
+let _selectedServerId=null;
+
+async function loadServers(){
+  const user=window._currentUser;
+  if(!user)return;
+  const db=window._db; const fns=window._fns;
+  const q=fns.query(fns.collection(db,'servers'),fns.where('uid','==',user.uid));
+  const snap=await fns.getDocs(q);
+  _servers=[];
+  snap.forEach(d=>_servers.push({id:d.id,...d.data()}));
+  renderServers();
+  updateConsoleSelect();
+}
+
+function renderServers(){
+  const grid=document.getElementById('server-grid');
+  const empty=document.getElementById('empty-state');
+  const online=_servers.filter(s=>s.status==='online').length;
+  document.getElementById('sc-total').textContent=_servers.length;
+  document.getElementById('sc-online').textContent=online;
+  document.getElementById('srv-count-label').textContent=_servers.length+' server'+(  _servers.length!==1?'s':'');
+  if(_servers.length===0){
+    grid.innerHTML='';grid.appendChild(empty);empty.style.display='block';return;
+  }
+  empty.style.display='none';
+  grid.innerHTML=_servers.map(s=>{
+    const statusClass='status-'+s.status;
+    const statusLabel=s.status.charAt(0).toUpperCase()+s.status.slice(1);
+    const ram=s.ram||1;
+    const ramUsed=s.status==='online'?Math.floor(Math.random()*60+20):0;
+    return `
+    <div class="srv-card" id="scard-${s.id}">
+      <div class="srv-top">
+        <div class="srv-name">${esc(s.name)}</div>
+        <div class="srv-status ${statusClass}"><div class="dot"></div>${statusLabel}</div>
+      </div>
+      <div class="srv-info">
+        <div class="srv-row"><span class="k">IP Address</span><span class="v">${esc(s.ip)}</span></div>
+        <div class="srv-row"><span class="k">Version</span><span class="v">${esc(s.version)}</span></div>
+        <div class="srv-row"><span class="k">Type</span><span class="v">${esc(s.type)}</span></div>
+        <div class="srv-row">
+          <span class="k">RAM ${s.status==='online'?ramUsed+'%':''}</span>
+          <div class="ram-bar"><div class="ram-fill" style="width:${s.status==='online'?ramUsed:0}%"></div></div>
+        </div>
+      </div>
+      <div class="srv-actions">
+        ${s.status!=='online'?`<button class="srv-btn srv-btn-start" onclick="serverAction('${s.id}','start')">▶ Start</button>`:''}
+        ${s.status==='online'?`<button class="srv-btn srv-btn-stop" onclick="serverAction('${s.id}','stop')">⏹ Stop</button>`:''}
+        <button class="srv-btn srv-btn-restart" onclick="serverAction('${s.id}','restart')">🔄</button>
+        <button class="srv-btn" style="background:rgba(0,170,255,.1);color:var(--blue);border:1px solid rgba(0,170,255,.2);" onclick="openDetail('${s.id}')">🔍</button>
+        <button class="srv-btn srv-btn-delete" onclick="deleteServer('${s.id}')">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function doCreateServer(){
+  const user=window._currentUser;
+  if(!user)return;
+  if(_servers.length>=3){
+    document.getElementById('create-err').textContent='Free plan limit: 3 servers max.';return;
+  }
+  const name=document.getElementById('srv-name').value.trim();
+  const version=document.getElementById('srv-version').value;
+  const type=document.getElementById('srv-type').value;
+  const ram=document.getElementById('srv-ram').value;
+  const err=document.getElementById('create-err');
+  const btn=document.getElementById('create-btn');
+  if(!name){err.textContent='Please enter a server name.';return;}
+  btn.innerHTML='<span class="spinner"></span>Creating...';btn.disabled=true;
+  // Generate a unique server IP (simulated)
+  const port=25565+Math.floor(Math.random()*100);
+  const ip=`play.crafthost.net:${port}`;
+  try{
+    const db=window._db; const fns=window._fns;
+    const ref=await fns.addDoc(fns.collection(db,'servers'),{
+      uid:user.uid,name,version,type,ram:parseInt(ram),
+      ip,status:'offline',createdAt:fns.serverTimestamp(),
+      logs:['[Server] Server created successfully.','[Server] Run "Start" to go online.']
+    });
+    closeModal('create');
+    document.getElementById('srv-name').value='';
+    err.textContent='';
+    toast('Server "'+name+'" created! ⛏️');
+    await loadServers();
+  }catch(e){
+    err.textContent='Failed to create server. Try again.';
+    console.error(e);
+  }
+  btn.innerHTML='🚀 Create Server';btn.disabled=false;
+}
+
+async function serverAction(id,action){
+  const db=window._db; const fns=window._fns;
+  const srv=_servers.find(s=>s.id===id);
+  if(!srv)return;
+  let newStatus='offline';
+  let logLine='';
+  if(action==='start'){newStatus='starting';logLine='[Server] Starting server...';}
+  if(action==='stop'){newStatus='offline';logLine='[Server] Server stopped.';}
+  if(action==='restart'){newStatus='starting';logLine='[Server] Restarting...';}
+  await fns.updateDoc(fns.doc(db,'servers',id),{status:newStatus,logs:fns.serverTimestamp?[...srv.logs||[],logLine]:[logLine]});
+  _servers=_servers.map(s=>s.id===id?{...s,status:newStatus}:s);
+  renderServers();
+  toast(action==='start'?'Starting server... ⚡':action==='stop'?'Server stopped.':'Restarting... 🔄');
+  if(action==='start'||action==='restart'){
+    setTimeout(async()=>{
+      await fns.updateDoc(fns.doc(db,'servers',id),{status:'online'});
+      _servers=_servers.map(s=>s.id===id?{...s,status:'online'}:s);
+      renderServers();
+      toast('Server is ONLINE! 🟢');
+    },3000);
+  }
+}
+
+async function deleteServer(id){
+  if(!confirm('Delete this server? This cannot be undone.'))return;
+  const db=window._db; const fns=window._fns;
+  await fns.deleteDoc(fns.doc(db,'servers',id));
+  toast('Server deleted.','error');
+  await loadServers();
+}
+
+// ════════════════════════════════════════
+// DETAIL MODAL
+// ════════════════════════════════════════
+function openDetail(id){
+  const srv=_servers.find(s=>s.id===id);
+  if(!srv)return;
+  _selectedServerId=id;
+  document.getElementById('detail-name').textContent=srv.name;
+  document.getElementById('detail-version').textContent=srv.version;
+  document.getElementById('detail-type').textContent=srv.type;
+  document.getElementById('detail-ram').textContent=srv.ram+'GB';
+  const sc=document.getElementById('detail-status');
+  sc.textContent=srv.status.charAt(0).toUpperCase()+srv.status.slice(1);
+  sc.style.color=srv.status==='online'?'var(--green)':srv.status==='starting'?'var(--yellow)':'var(--muted)';
+  document.getElementById('detail-ip-text').textContent=srv.ip;
+  openModal('detail');
+}
+function copyIP(){
+  const t=document.getElementById('detail-ip-text').textContent;
+  navigator.clipboard.writeText(t).then(()=>toast('IP copied to clipboard! 📋'));
+}
+function detailAction(a){
+  if(!_selectedServerId)return;
+  closeModal('detail');
+  serverAction(_selectedServerId,a);
+}
+
+// ════════════════════════════════════════
+// CONSOLE
+// ════════════════════════════════════════
+function updateConsoleSelect(){
+  const sel=document.getElementById('console-srv-select');
+  sel.innerHTML='<option value="">-- Choose a server --</option>'+
+    _servers.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+
+function loadConsole(){
+  const id=document.getElementById('console-srv-select').value;
+  const box=document.getElementById('console-box');
+  if(!id){box.innerHTML='<div class="console-line">[CraftHost] Select a server above.</div>';return;}
+  const srv=_servers.find(s=>s.id===id);
+  if(!srv){return;}
+  const fakeLogs=[
+    {t:'green',m:`[${timeNow()}] [Server thread/INFO]: Starting Minecraft server ${srv.version}`},
+    {t:'white',m:`[${timeNow()}] [Server thread/INFO]: Server type: ${srv.type}`},
+    {t:'white',m:`[${timeNow()}] [Server thread/INFO]: RAM allocated: ${srv.ram}GB`},
+    srv.status==='online'?{t:'green',m:`[${timeNow()}] [Server thread/INFO]: Done! Server is ONLINE.`}:{t:'yellow',m:`[${timeNow()}] [Server thread/WARN]: Server is currently offline.`},
+  ];
+  box.innerHTML=fakeLogs.map(l=>`<div class="console-line ${l.t}">${esc(l.m)}</div>`).join('');
+  box.scrollTop=box.scrollHeight;
+}
+
+function timeNow(){return new Date().toTimeString().slice(0,8);}
+
+function sendCmd(){
+  const id=document.getElementById('console-srv-select').value;
+  const inp=document.getElementById('console-input');
+  const box=document.getElementById('console-box');
+  if(!id){toast('Select a server first.','error');return;}
+  const cmd=inp.value.trim();
+  if(!cmd)return;
+  const line=document.createElement('div');
+  line.className='console-line white';
+  line.textContent=`[${timeNow()}] [Console] > ${cmd}`;
+  box.appendChild(line);
+  // Simulate response
+  setTimeout(()=>{
+    const resp=document.createElement('div');
+    resp.className='console-line green';
+    resp.textContent=`[${timeNow()}] [Server] Command executed: ${cmd}`;
+    box.appendChild(resp);
+    box.scrollTop=box.scrollHeight;
+  },400);
+  inp.value='';
+  box.scrollTop=box.scrollHeight;
+}
+
+// ════════════════════════════════════════
+// SETTINGS
+// ════════════════════════════════════════
+async function saveProfile(){
+  const name=document.getElementById('set-name').value.trim();
+  if(!name){toast('Name cannot be empty.','error');return;}
+  const user=window._currentUser;
+  await window._fns.updateProfile(user,{displayName:name});
+  await window._fns.updateDoc(window._fns.doc(window._db,'users',user.uid),{name});
+  document.getElementById('sb-name').textContent=name;
+  document.getElementById('sb-avatar').textContent=name[0].toUpperCase();
+  toast('Profile saved! ✅');
+}
+
+// ════════════════════════════════════════
+// TAB SWITCHING
+// ════════════════════════════════════════
+function switchTab(tab){
+  document.querySelectorAll('.dash-section').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  const items=document.querySelectorAll('.nav-item');
+  const map={servers:0,console:1,settings:2};
+  if(map[tab]!==undefined)items[map[tab]].classList.add('active');
+  if(tab==='console')updateConsoleSelect();
+}
+
+// ════════════════════════════════════════
+// SCROLL REVEAL (landing)
+// ════════════════════════════════════════
+const observer=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{if(e.isIntersecting)e.target.classList.add('visible');});
+},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(r=>observer.observe(r));
+
+// ════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════
+function esc(s){
+  if(!s)return'';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
